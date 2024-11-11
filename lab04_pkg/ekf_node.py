@@ -22,7 +22,7 @@ class Localization(Node):
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
         #initial velocity
         self.v = 0.0
-        self.w = 1e-6
+        self.w = 1e-9
         #subscription to /landmarks to get the range and bearing of the landmarks
         self.lmark_sub = self.create_subscription(LandmarkArray, '/landmarks', self.update, 10)
         #period of the filter

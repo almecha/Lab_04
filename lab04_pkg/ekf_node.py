@@ -22,7 +22,7 @@ class Localization(Node):
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
         #initial velocity
         self.v = 0.0
-        self.w = 0.0
+        self.w = 1e-6
         #subscription to /landmarks to get the range and bearing of the landmarks
         self.lmark_sub = self.create_subscription(LandmarkArray, '/landmarks', self.update, 10)
         #period of the filter
@@ -45,7 +45,7 @@ class Localization(Node):
                             eval_gux=self.eval_gux,
                             eval_Gt=self.eval_Gt,
                             eval_Vt=self.eval_Vt)
-        self.ekf.mu = np.array([0.0,0.0,0.0]) #consider the origin as the initial position
+        self.ekf.mu = np.array([-2.0,-0.5,0.0]) #consider the origin as the initial position
         self.ekf.Sigma=np.diag([0.1,0.1,0.1])
         self.ekf.Mt = self.Mt
 
@@ -78,9 +78,8 @@ class Localization(Node):
     def odom_callback(self, msg : Odometry):
         self.v = msg.twist.twist.linear.x
         self.w = msg.twist.twist.angular.z
-        if abs(self.w) > 0.02:
-            _, self.eval_Gt, self.eval_Vt = velocity_mm_simpy()
-            self.ekf.dim_u = 2
+        if self.w == 0:
+            self.w = 1e-6
 
     def predict(self):
         u = np.array([self.v, self.w])
@@ -107,12 +106,15 @@ class Localization(Node):
                                 angle_idx=-1)
         self.ekf_msg.header.stamp = self.get_clock().now().to_msg()
         #extract the position from the mu
-        self.ekf_msg.pose.pose.x = self.ekf.mu[0]
-        self.ekf_msg.pose.pose.y = self.ekf.mu[1]
-        self.ekf_msg.pose.pose.z = 0
+        self.ekf_msg.pose.pose.position.x = self.ekf.mu[0]
+        self.ekf_msg.pose.pose.position.y = self.ekf.mu[1]
+        self.ekf_msg.pose.pose.position.z = 0.0
         #modify the theta angle as a quaternion in oder to publish the result on a Odometry message
-        quaternion = quaternion_from_euler(0.0, 0.0, self.ekf.mu[2])
-        self.ekf_msg.pose.pose.orientation = Quaternion(*quaternion)
+        quat = quaternion_from_euler(0.0, 0.0, self.ekf.mu[2])
+        self.ekf_msg.pose.pose.orientation.x = quat[0]
+        self.ekf_msg.pose.pose.orientation.y = quat[1]
+        self.ekf_msg.pose.pose.orientation.z = quat[2]
+        self.ekf_msg.pose.pose.orientation.w = quat[3]
         self.ekf_pub.publish(self.ekf_msg)
 
 

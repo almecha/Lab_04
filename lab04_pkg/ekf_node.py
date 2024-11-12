@@ -38,7 +38,7 @@ class Localization(Node):
         self.eval_gux = sample_velocity_motion_model
         _, self.eval_Gt, self.eval_Vt = velocity_mm_simpy()
         self.std_lin_vel = 0.1
-        self.std_ang_vel = np.deg2rad(1.0)
+        self.std_ang_vel = np.deg2rad(2.0)
         self.Mt = np.diag([self.std_lin_vel**2, self.std_ang_vel**2])
         self.ekf = RobotEKF(dim_x=3, #(x,y,theta)
                             dim_u=2, #(v,w=0)
@@ -71,7 +71,7 @@ class Localization(Node):
         self.eval_hx_landm = landmark_range_bearing_model
         _, self.eval_Ht_landm = landmark_sm_simpy()
         self.std_range = 0.1
-        self.std_bearing = np.deg2rad(1.0)
+        self.std_bearing = np.deg2rad(2.0)
         self.Q_landm = np.diag([self.std_range**2, self.std_bearing**2])
         self.sigma_z = np.array([self.std_range, self.std_bearing])
 
@@ -80,6 +80,8 @@ class Localization(Node):
         self.w = msg.twist.twist.angular.z
         if self.w == 0:
             self.w = 1e-6
+        self.std_lin_vel = msg.twist.covariance[0]
+        self.std_ang_vel = msg.twist.covariance[-1]
 
     def predict(self):
         u = np.array([self.v, self.w])

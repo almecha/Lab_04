@@ -7,7 +7,7 @@ import numpy as np
 import sympy
 from nav_msgs.msg import Odometry
 from landmark_msgs.msg import LandmarkArray
-from geometry_msgs.msg import Quaternion
+from geometry_msgs.msg import Twist
 from lab04_pkg.utils.utils import residual
 from lab04_pkg.utils.ekf import RobotEKF
 from lab04_pkg.utils.probabilistic_models import sample_velocity_motion_model,landmark_range_bearing_model
@@ -19,7 +19,9 @@ class Localization(Node):
         super().__init__('Localization')
         self.get_logger().info("EKF node initialized")
         #subscription to /odom to get the velocity from twist
-        self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+        #self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+        #subscription to /odom to get the velocity from twist
+        self.odom_sub = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
         #initial velocity
         self.v = 0.0
         self.w = 1e-9
@@ -33,12 +35,11 @@ class Localization(Node):
         self.ekf_pub = self.create_publisher(Odometry, '/ekf', 10)
         #message of which we publish the result
         self.ekf_msg = Odometry()
-
         #parameters needed to the EKF class:
         self.eval_gux = sample_velocity_motion_model
         _, self.eval_Gt, self.eval_Vt = velocity_mm_simpy()
-        self.std_lin_vel = 0.1
-        self.std_ang_vel = np.deg2rad(2.0)
+        self.std_lin_vel = 0.05
+        self.std_ang_vel = 0.02
         self.Mt = np.diag([self.std_lin_vel**2, self.std_ang_vel**2])
         self.ekf = RobotEKF(dim_x=3, #(x,y,theta)
                             dim_u=2, #(v,w=0)
@@ -46,12 +47,12 @@ class Localization(Node):
                             eval_Gt=self.eval_Gt,
                             eval_Vt=self.eval_Vt)
         self.ekf.mu = np.array([-2.0,-0.5,0.0]) #consider the origin as the initial position
-        self.ekf.Sigma=np.diag([0.1,0.1,0.1])
+        self.ekf.Sigma=np.diag([0.01,0.01,0.01])
         self.ekf.Mt = self.Mt
 
         #retrive landmarks position from yaml file:
         # Declare parameters with default values
-        self.declare_parameter('landmarks.id', [11, 12, 13, 21, 22, 23, 31, 32, 33])
+        self.declare_parameter('landmarks.id',[11, 12, 13, 21, 22, 23, 31, 32, 33])
         self.declare_parameter('landmarks.x', [-1.1, -1.1, -1.1, 0.0, 0.0, 0.0, 1.1, 1.1, 1.1])
         self.declare_parameter('landmarks.y', [-1.1, 0.0, 1.1, -1.1, 0.0, 1.1, -1.1, 0.0, 1.1])
         self.declare_parameter('landmarks.z', [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -70,18 +71,16 @@ class Localization(Node):
         #parameters needed for the update of the EKF
         self.eval_hx_landm = landmark_range_bearing_model
         _, self.eval_Ht_landm = landmark_sm_simpy()
-        self.std_range = 0.1
-        self.std_bearing = np.deg2rad(2.0)
+        self.std_range = 0.02
+        self.std_bearing = 0.02
         self.Q_landm = np.diag([self.std_range**2, self.std_bearing**2])
         self.sigma_z = np.array([self.std_range, self.std_bearing])
 
-    def odom_callback(self, msg : Odometry):
-        self.v = msg.twist.twist.linear.x
-        self.w = msg.twist.twist.angular.z
+    def cmd_vel_callback(self, msg : Twist):
+        self.v = msg.linear.x
+        self.w = msg.angular.z
         if self.w == 0:
             self.w = 1e-6
-        self.std_lin_vel = msg.twist.covariance[0]
-        self.std_ang_vel = msg.twist.covariance[-1]
 
     def predict(self):
         u = np.array([self.v, self.w])

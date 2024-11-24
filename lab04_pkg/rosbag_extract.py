@@ -384,8 +384,9 @@ def plot_x_y_theta(timestamps_real, real_positions, timestamps_ekf, ekf_position
     plt.show()
 
 
+
 # Main execution
-bag_path = "/home/francesco-masin/bag_files/simulation"
+bag_path = "../rosbag_files/rosbag_files/rosbag2_2024_11_24-13_56_07/rosbag2_2024_11_24-13_56_07_0.db3"
 
 # New landmarks with IDs and coordinates
 landmark_ids = [11, 12, 13, 21, 22, 23, 31, 32, 33]

@@ -10,18 +10,24 @@ from landmark_msgs.msg import LandmarkArray
 from geometry_msgs.msg import Twist
 from lab04_pkg.utils.utils import residual
 from lab04_pkg.utils.ekf import RobotEKF
-from lab04_pkg.utils.probabilistic_models import sample_velocity_motion_model,landmark_range_bearing_model
-from lab04_pkg.utils.probabilistic_models import velocity_mm_simpy, velocity_mm_simpy2,landmark_sm_simpy
+from sensor_msgs.msg import Imu
+
+from lab04_pkg.utils.probabilistic_models_task2 import sample_velocity_motion_model, velocity_mm_simpy, landmark_range_bearing_model, landmark_sm_simpy
+from lab04_pkg.utils.probabilistic_models_task2 import ht_odom, ht_odom_mm_simpy
+from lab04_pkg.utils.probabilistic_models_task2 import ht_imu, ht_imu_mm_simpy
 from tf_transformations import quaternion_from_euler
 
 class Localization(Node):
     def __init__(self):
-        super().__init__('Localization')
+        super().__init__('EKF Localization')
         self.get_logger().info("EKF node initialized")
-        #subscription to /odom to get the velocity from twist
-        #self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
-        #subscription to /odom to get the velocity from twist
+        #subscription to /odom to update the state of the filter
+        self.odom_sub = self.create_subscription(Odometry, '/cmd_vel', self.cmd_update_callback, 10)
+        #subscription to /cmd_vel to get the velocity from twist
         self.odom_sub = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
+        #subscription to /odom to update the state of the filter
+        self.imu_sub = self.create_subscription(Imu, '/imu', self.imu_update_callback, 10)
+        self.imu_sub
         #initial velocity
         self.v = 0.0
         self.w = 1e-9
@@ -46,8 +52,8 @@ class Localization(Node):
                             eval_gux=self.eval_gux,
                             eval_Gt=self.eval_Gt,
                             eval_Vt=self.eval_Vt)
-        self.ekf.mu = np.array([-2.0,-0.5,0.0]) #consider the origin as the initial position
-        self.ekf.Sigma=np.diag([0.01,0.01,0.01])
+        self.ekf.mu = np.array([-2.0,-0.5,0.0, 0.0, 0.0]) #consider the origin as the initial position
+        self.ekf.Sigma=np.diag([0.03,0.03,0.03,0.03,0.03])
         self.ekf.Mt = self.Mt
 
         #retrive landmarks position from yaml file:
@@ -71,10 +77,25 @@ class Localization(Node):
         #parameters needed for the update of the EKF
         self.eval_hx_landm = landmark_range_bearing_model
         _, self.eval_Ht_landm = landmark_sm_simpy()
-        self.std_range = 0.02
-        self.std_bearing = 0.02
+        self.std_range = 0.01
+        self.std_bearing = 0.01
         self.Q_landm = np.diag([self.std_range**2, self.std_bearing**2])
         self.sigma_z = np.array([self.std_range, self.std_bearing])
+
+        #parameters needed for the update of the EKF from ODOM
+        self.eval_hx_odom = ht_odom
+        _, self.eval_Ht_odom = ht_odom_mm_simpy()
+        self.std_v_hat = 0.05
+        self.std_w_hat = 0.03
+        self.Q_odom = np.diag([self.std_v_hat**2, self.std_w_hat**2])
+        self.sigma_z_odom = np.array([self.std_v_hat, self.w_hat])
+
+        #parameters needed for the update of the EKF from IMU
+        self.eval_hx_imu = ht_imu
+        _, self.eval_Ht_imu = ht_imu_mm_simpy()
+        self.std_w_hat_imu = 0.03
+        self.Q_imu = np.diag([self.std_w_hat**2])
+        self.sigma_z_imu = np.array([self.w_hat])
 
     def cmd_vel_callback(self, msg : Twist):
         self.v = msg.linear.x
@@ -86,6 +107,21 @@ class Localization(Node):
         u = np.array([self.v, self.w])
         sigma_u = np.array([self.std_lin_vel, self.std_ang_vel])
         self.ekf.predict(u=u, sigma_u=sigma_u,g_extra_args=(self.ekf_dt,))
+
+    def imu_update_callback(self, msg : Imu ):
+        w_hat = msg.angular_velocity.z
+        z = [w_hat]
+        self.ekf.update(z , eval_hx = self.eval_hx_imu, eval_Ht = self.eval_Ht_imu, Qt = self.Q_imu,
+                        Ht_args = (self.ekf.mu), hx_args = (*self.ekf.mu, z, *self.sigma_z_imu),
+                        residual = residual, angle_idx = -1)
+
+    def cmd_update_callback(self, msg : Twist):
+        v_hat = msg.linear.x
+        w_hat = msg.angular.z
+        z = [v_hat, w_hat]
+        self.ekf.update(z , eval_hx = self.eval_hx_odom, eval_Ht = self.eval_Ht_odom, Qt = self.Q_odom,
+                        Ht_args = (self.ekf.mu), hx_args = (*self.ekf.mu, z, *self.sigma_z_odom),
+                        residual = residual, angle_idx = -1)
 
     def update(self, msg : LandmarkArray):
         #extract the necessary parameters from the message
@@ -116,6 +152,12 @@ class Localization(Node):
         self.ekf_msg.pose.pose.orientation.y = quat[1]
         self.ekf_msg.pose.pose.orientation.z = quat[2]
         self.ekf_msg.pose.pose.orientation.w = quat[3]
+        self.ekf_msg.twist.twist.linear.x = self.ekf.mu[3]
+        self.ekf_msg.twist.twist.linear.y = 0.0
+        self.ekf_msg.twist.twist.linear.z = 0.0
+        self.ekf_msg.twist.twist.angular.z = self.ekf.mu[4]
+        self.ekf_msg.twist.twist.angular.x = 0.0
+        self.ekf_msg.twist.twist.angular.y = 0.0
         self.ekf_pub.publish(self.ekf_msg)
 
 
